@@ -1,0 +1,25 @@
+#compdef llama-swap
+
+_llama-swap() {
+  local -a commands=(
+    'list:List profiles, mark the active one'
+    'set:Set the active profile'
+    'watch:Keep the profile in sync with sddm (used by the systemd service)'
+  )
+
+  local -a profiles=()
+  local config=${LLAMA_SWAP_CONFIG:-$HOME/dotfiles/llama-swap/config.yaml}
+  if (( CURRENT == 3 )) && [[ $words[2] == set ]] && [[ -f $config ]]; then
+    profiles=(${(f)"$(awk '
+      /^profiles:/ { in_profiles = 1; next }
+      in_profiles && /^[A-Za-z][A-Za-z0-9_-]*:/ { in_profiles = 0 }
+      in_profiles && /^  [A-Za-z0-9._-]+:/ { sub(/^  /, ""); sub(/:$/, ""); print }
+    ' "$config")"})
+  fi
+
+  if (( CURRENT == 2 )); then
+    _describe 'command' commands
+  elif (( CURRENT == 3 )); then
+    _describe 'profile' profiles
+  fi
+}

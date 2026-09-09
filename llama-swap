@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+URL=${LLAMA_SWAP_URL:-http://localhost:8020}
+CONFIG=${LLAMA_SWAP_CONFIG:-$HOME/dotfiles/llama-swap/config.yaml}
+PROFILE_DESKTOP=vllm-3090
+PROFILE_HEADLESS=vllm-dual
+POLL=${LLAMA_SWAP_POLL:-2}
+RETRY=10
+API_CODE=""
+API_BODY=""
+
+api() {
+  local method=$1 path=$2 body=${3-}
+  local args=(-s -w $'\n%{http_code}' -X "$method")
+  if [[ -n $body ]]; then
+    args+=(-H 'Content-Type: application/json' -d "$body")
+  fi
+  if [[ -n ${LLAMA_SWAP_API_KEY-} ]]; then
+    args+=(-H "Authorization: Bearer $LLAMA_SWAP_API_KEY")
+  fi
+  local resp
+  if ! resp=$(curl "${args[@]}" "$URL$path" 2>/dev/null); then
+    API_CODE=""
+    API_BODY=""
+    printf 'llama-swap: cannot reach llama-swap at %s\n' "$URL" >&2
+    return 1
+  fi
+  API_CODE=${resp##*$'\n'}
+  API_BODY=${resp%$'\n'*}
+  printf '%s\n' "$API_BODY"
+  [[ $API_CODE == 2* ]]
+}
+
+set_profile() {
+  local name=$1
+  local json active new
+  json=$(api GET /api/profiles) || return 1
+  active=$(jq -r .active <<<"$json")
+  if [[ $active == "$name" ]]; then
+    # no-op when already active: this is what keeps the watcher churn-free
+    printf 'llama-swap: %s is already active\n' "$name"
+    return 0
+  fi
+  # in the current shell, not $( ), so API_CODE/API_BODY survive the call
+  api PUT /api/profiles/active "{\"name\":\"$name\"}" >/dev/null || :
+  if [[ $API_CODE == 2* ]]; then
+    new=$(jq -r .active <<<"$API_BODY")
+    [[ $new == "$name" ]] || return 1
+    printf 'llama-swap: active profile set to %s\n' "$name"
+  elif [[ $API_CODE == 404 ]]; then
+    printf "llama-swap: unknown profile '%s'\n" "$name" >&2
+    jq -r '.profiles | map(.id) | join(", ")' <<<"$json" >&2
+    return 1
+  elif [[ -n $API_CODE ]]; then
+    printf '%s\n' "$API_BODY" >&2
+    return 1
+  else
+    # no response at all; api already printed the connection failure
+    return 1
+  fi
+}
+
+cmd_list() {
+  local json
+  json=$(api GET /api/profiles) || exit 1
+  jq -r '
+    .active as $active
+    | .profiles[]
+    | ((if .id == $active then "* " else "  " end) + .id)
+      + (if (.description // "") != "" then "\n  # " + .description else "" end)
+  ' <<<"$json"
+}
+
+cmd_set() {
+  local name=${1-}
+  if ! [[ $name =~ ^[A-Za-z0-9._-]+$ ]]; then
+    printf 'usage: llama-swap set <name>\n' >&2
+    exit 2
+  fi
+  set_profile "$name" || exit 1
+}
+
+watch() {
+  local st target last=""
+  while :; do
+    st=$(systemctl is-active sddm 2>/dev/null || true)
+    case $st in
+      active|activating) target=$PROFILE_DESKTOP ;;
+      *) target=$PROFILE_HEADLESS ;;
+    esac
+    if [[ $target != "$last" ]]; then
+      if set_profile "$target"; then
+        last=$target
+        printf 'llama-swap: sddm=%s, active profile %s\n' "$st" "$target"
+        sleep $POLL
+      else
+        # a failed set leaves last unchanged so the next poll retries;
+        # slower cadence while the daemon is down so the journal does not flood
+        sleep $RETRY
+      fi
+    else
+      sleep $POLL
+    fi
+  done
+}
+
+usage() {
+  cat >&2 <<'EOF'
+usage: llama-swap <command>
+
+  list   list profiles, mark the active one
+  set    set the active profile
+  watch  keep the profile in sync with sddm (used by the systemd service)
+
+env: LLAMA_SWAP_URL, LLAMA_SWAP_CONFIG, LLAMA_SWAP_API_KEY, LLAMA_SWAP_POLL
+EOF
+}
+
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 1
+fi
+case $1 in
+  list) cmd_list ;;
+  set) cmd_set "${2-}" ;;
+  watch) watch ;;
+  -h|--help) usage; exit 0 ;;
+  *) usage; exit 1 ;;
+esac
