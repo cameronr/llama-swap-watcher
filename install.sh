@@ -11,8 +11,8 @@ run() {
   fi
 }
 
-run install -m 0755 llama-swap /usr/local/bin/llama-swap
-run install -m 0644 _llama-swap /usr/local/share/zsh/site-functions/_llama-swap
+run install -m 0755 llama-swap-cli /usr/local/bin/llama-swap-cli
+run install -m 0644 _llama-swap-cli /usr/local/share/zsh/site-functions/_llama-swap-cli
 run install -m 0644 llama-swap-sddm.service /etc/systemd/system/llama-swap-sddm.service
 
 run systemctl daemon-reload

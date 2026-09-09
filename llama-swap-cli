@@ -23,7 +23,7 @@ api() {
   if ! resp=$(curl "${args[@]}" "$URL$path" 2>/dev/null); then
     API_CODE=""
     API_BODY=""
-    printf 'llama-swap: cannot reach llama-swap at %s\n' "$URL" >&2
+    printf 'llama-swap-cli: cannot reach llama-swap at %s\n' "$URL" >&2
     return 1
   fi
   API_CODE=${resp##*$'\n'}
@@ -39,7 +39,7 @@ set_profile() {
   active=$(jq -r .active <<<"$json")
   if [[ $active == "$name" ]]; then
     # no-op when already active: this is what keeps the watcher churn-free
-    printf 'llama-swap: %s is already active\n' "$name"
+    printf 'llama-swap-cli: %s is already active\n' "$name"
     return 0
   fi
   # in the current shell, not $( ), so API_CODE/API_BODY survive the call
@@ -47,9 +47,9 @@ set_profile() {
   if [[ $API_CODE == 2* ]]; then
     new=$(jq -r .active <<<"$API_BODY")
     [[ $new == "$name" ]] || return 1
-    printf 'llama-swap: active profile set to %s\n' "$name"
+    printf 'llama-swap-cli: active profile set to %s\n' "$name"
   elif [[ $API_CODE == 404 ]]; then
-    printf "llama-swap: unknown profile '%s'\n" "$name" >&2
+    printf "llama-swap-cli: unknown profile '%s'\n" "$name" >&2
     jq -r '.profiles | map(.id) | join(", ")' <<<"$json" >&2
     return 1
   elif [[ -n $API_CODE ]]; then
@@ -75,7 +75,7 @@ cmd_list() {
 cmd_set() {
   local name=${1-}
   if ! [[ $name =~ ^[A-Za-z0-9._-]+$ ]]; then
-    printf 'usage: llama-swap set <name>\n' >&2
+    printf 'usage: llama-swap-cli set <name>\n' >&2
     exit 2
   fi
   set_profile "$name" || exit 1
@@ -92,7 +92,7 @@ watch() {
     if [[ $target != "$last" ]]; then
       if set_profile "$target"; then
         last=$target
-        printf 'llama-swap: sddm=%s, active profile %s\n' "$st" "$target"
+        printf 'llama-swap-cli: sddm=%s, active profile %s\n' "$st" "$target"
         sleep $POLL
       else
         # a failed set leaves last unchanged so the next poll retries;
@@ -107,7 +107,7 @@ watch() {
 
 usage() {
   cat >&2 <<'EOF'
-usage: llama-swap <command>
+usage: llama-swap-cli <command>
 
   list   list profiles, mark the active one
   set    set the active profile

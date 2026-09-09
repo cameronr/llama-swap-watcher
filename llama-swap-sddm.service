@@ -2,7 +2,7 @@
 Description=llama-swap profile switcher: vllm-3090 while sddm runs, vllm-dual when it stops
 
 [Service]
-ExecStart=/usr/local/bin/llama-swap watch
+ExecStart=/usr/local/bin/llama-swap-cli watch
 Restart=on-failure
 RestartSec=2
 

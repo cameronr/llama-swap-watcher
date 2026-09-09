@@ -1,6 +1,6 @@
-#compdef llama-swap
+#compdef llama-swap-cli
 
-_llama-swap() {
+_llama-swap-cli() {
   local -a commands=(
     'list:List profiles, mark the active one'
     'set:Set the active profile'
