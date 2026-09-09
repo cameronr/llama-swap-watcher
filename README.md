@@ -18,6 +18,9 @@ own binary is `llama-swap`, so the CLI cannot take that name.
 zsh completes profile names after `llama-swap-cli set`, reading them from the
 llama-swap config file.
 
+`llama-swap-cli unload` stops every loaded model via
+`POST /api/models/unload`, freeing GPU VRAM.
+
 `sudo ./install.sh` installs the command to `/usr/local/bin/llama-swap-cli`,
 the completion to `/usr/local/share/zsh/site-functions/_llama-swap-cli`, the
 unit to `/etc/systemd/system/`, then runs `systemctl daemon-reload` and
@@ -32,6 +35,14 @@ the right profile is already active it does nothing, so a healthy setup
 generates no API traffic. If the daemon is unreachable, the watcher retries
 every 10 seconds instead of exiting, which is why the unit's
 `Restart=on-failure` never trips during a daemon outage.
+
+When a switch to the desktop profile (`vllm-3090`) succeeds, the CLI follows
+up with `POST /api/models/unload` so no model keeps the 3090's VRAM while
+hyprland runs. That call blocks until the model processes stop (docker
+stop), so the first switch after a headless session takes a few extra
+seconds. The unload is best effort: if it fails the profile switch stays in
+place and a warning is printed. Switches to other profiles, and a no-op set
+of the already-active profile, do not unload anything.
 
 ## Configuration
 

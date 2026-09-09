@@ -32,6 +32,21 @@ api() {
   [[ $API_CODE == 2* ]]
 }
 
+# Stop every loaded model (POST /api/models/unload). Called after a switch to
+# the desktop profile so the 3090 keeps its VRAM free for hyprland. Blocks
+# until the daemon has stopped the processes (docker stop), so it can take a
+# few seconds. Best effort: a failure here never undoes the profile switch.
+unload_all() {
+  if ! api POST /api/models/unload >/dev/null; then
+    # no http code means the daemon is unreachable and api() already reported it
+    if [[ -n $API_CODE ]]; then
+      printf 'llama-swap-cli: failed to unload models: http %s\n' "$API_CODE" >&2
+    fi
+    return 1
+  fi
+  printf 'llama-swap-cli: unloaded all models\n'
+}
+
 set_profile() {
   local name=$1
   local json active new
@@ -48,6 +63,10 @@ set_profile() {
     new=$(jq -r .active <<<"$API_BODY")
     [[ $new == "$name" ]] || return 1
     printf 'llama-swap-cli: active profile set to %s\n' "$name"
+    if [[ $name == "$PROFILE_DESKTOP" ]]; then
+      # desktop profile: free the 3090's VRAM for hyprland (best effort)
+      unload_all || :
+    fi
   elif [[ $API_CODE == 404 ]]; then
     printf "llama-swap-cli: unknown profile '%s'\n" "$name" >&2
     jq -r '.profiles | map(.id) | join(", ")' <<<"$json" >&2
@@ -81,6 +100,10 @@ cmd_set() {
   set_profile "$name" || exit 1
 }
 
+cmd_unload() {
+  unload_all || exit 1
+}
+
 watch() {
   local st target last=""
   while :; do
@@ -111,6 +134,7 @@ usage: llama-swap-cli <command>
 
   list   list profiles, mark the active one
   set    set the active profile
+  unload stop all loaded models (frees GPU VRAM)
   watch  keep the profile in sync with sddm (used by the systemd service)
 
 env: LLAMA_SWAP_URL, LLAMA_SWAP_CONFIG, LLAMA_SWAP_API_KEY, LLAMA_SWAP_POLL
@@ -124,6 +148,7 @@ fi
 case $1 in
   list) cmd_list ;;
   set) cmd_set "${2-}" ;;
+  unload) cmd_unload ;;
   watch) watch ;;
   -h|--help) usage; exit 0 ;;
   *) usage; exit 1 ;;

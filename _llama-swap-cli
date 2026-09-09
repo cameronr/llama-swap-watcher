@@ -4,6 +4,7 @@ _llama-swap-cli() {
   local -a commands=(
     'list:List profiles, mark the active one'
     'set:Set the active profile'
+    'unload:Stop all loaded models (frees GPU VRAM)'
     'watch:Keep the profile in sync with sddm (used by the systemd service)'
   )
 
