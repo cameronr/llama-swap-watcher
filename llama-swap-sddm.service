@@ -1,0 +1,10 @@
+[Unit]
+Description=llama-swap profile switcher: vllm-3090 while sddm runs, vllm-dual when it stops
+
+[Service]
+ExecStart=/usr/local/bin/llama-swap watch
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
