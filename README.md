@@ -29,12 +29,15 @@ unit to `/etc/systemd/system/`, then runs `systemctl daemon-reload` and
 ## How the service behaves
 
 `llama-swap-cli watch` polls `systemctl is-active sddm` every 2 seconds. When
-sddm is `active` or `activating`, the profile becomes `vllm-3090`; in every
-other state it becomes `vllm-dual`. The watcher acts on transitions only. If
-the right profile is already active it does nothing, so a healthy setup
-generates no API traffic. If the daemon is unreachable, the watcher retries
-every 10 seconds instead of exiting, which is why the unit's
-`Restart=on-failure` never trips during a daemon outage.
+sddm is `active` or `activating`, the target profile is `vllm-3090`; in every
+other state it is `vllm-dual`. Every poll also re-reads the daemon's active
+profile and switches only when it differs, so a healthy setup costs one GET
+per poll and zero writes. Verifying every poll (not just on sddm
+transitions) is what recovers a daemon restart: the API has no notion of a
+default profile, so a restart drops the active profile to `none` and the
+watcher puts the right one back within one poll. If the daemon is
+unreachable, the watcher retries every 10 seconds instead of exiting, which
+is why the unit's `Restart=on-failure` never trips during a daemon outage.
 
 When a switch to the desktop profile (`vllm-3090`) succeeds, the CLI follows
 up with `POST /api/models/unload` so no model keeps the 3090's VRAM while

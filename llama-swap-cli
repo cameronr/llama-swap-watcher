@@ -46,14 +46,15 @@ unload_all() {
   printf 'llama-swap-cli: unloaded all models\n'
 }
 
+# set_profile NAME [quiet]: no-op when NAME is already active, and silent
+# when quiet, so the watcher can call it every poll without log noise.
 set_profile() {
-  local name=$1
+  local name=$1 quiet=${2-}
   local json active new
   json=$(api GET /api/profiles) || return 1
   active=$(jq -r .active <<<"$json")
   if [[ $active == "$name" ]]; then
-    # no-op when already active: this is what keeps the watcher churn-free
-    printf 'llama-swap-cli: %s is already active\n' "$name"
+    [[ -n $quiet ]] || printf 'llama-swap-cli: %s is already active\n' "$name"
     return 0
   fi
   # in the current shell, not $( ), so API_CODE/API_BODY survive the call
@@ -103,6 +104,10 @@ cmd_unload() {
   unload_all || exit 1
 }
 
+# Every poll, not just on sddm transitions: a daemon restart can drop the
+# active profile to none, and a stale last would keep the watcher from
+# noticing that. set_profile is a no-op when the profile already matches, so
+# the steady state is one cheap GET per poll and zero writes.
 watch() {
   local st target last=""
   while :; do
@@ -112,17 +117,14 @@ watch() {
       *) target=$PROFILE_HEADLESS ;;
     esac
     if [[ $target != "$last" ]]; then
-      if set_profile "$target"; then
-        last=$target
-        printf 'llama-swap-cli: sddm=%s, active profile %s\n' "$st" "$target"
-        sleep $POLL
-      else
-        # a failed set leaves last unchanged so the next poll retries;
-        # slower cadence while the daemon is down so the journal does not flood
-        sleep $RETRY
-      fi
-    else
+      last=$target
+      printf 'llama-swap-cli: sddm=%s, target %s\n' "$st" "$target"
+    fi
+    if set_profile "$target" quiet; then
       sleep $POLL
+    else
+      # daemon down or a failed set; slower cadence so the journal does not flood
+      sleep $RETRY
     fi
   done
 }
