@@ -2,7 +2,6 @@
 set -euo pipefail
 
 URL=${LLAMA_SWAP_URL:-http://localhost:8020}
-CONFIG=${LLAMA_SWAP_CONFIG:-$HOME/dotfiles/llama-swap/config.yaml}
 PROFILE_DESKTOP=vllm-3090
 PROFILE_HEADLESS=vllm-dual
 POLL=${LLAMA_SWAP_POLL:-2}
@@ -137,7 +136,7 @@ usage: llama-swap-cli <command>
   unload stop all loaded models (frees GPU VRAM)
   watch  keep the profile in sync with sddm (used by the systemd service)
 
-env: LLAMA_SWAP_URL, LLAMA_SWAP_CONFIG, LLAMA_SWAP_API_KEY, LLAMA_SWAP_POLL
+env: LLAMA_SWAP_URL, LLAMA_SWAP_API_KEY, LLAMA_SWAP_POLL
 EOF
 }
 

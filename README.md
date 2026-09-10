@@ -47,9 +47,9 @@ of the already-active profile, do not unload anything.
 ## Configuration
 
 The env overrides are `LLAMA_SWAP_URL` (daemon base URL, default
-`http://localhost:8020`), `LLAMA_SWAP_CONFIG` (the config file zsh
-completion reads, default `$HOME/dotfiles/llama-swap/config.yaml`), and
-`LLAMA_SWAP_API_KEY` (sent as a Bearer token when non-empty; this
-deployment has none), and `LLAMA_SWAP_POLL` (watcher poll interval in
-seconds, default 2). The profile names themselves are not env vars:
+`http://localhost:8020`), `LLAMA_SWAP_API_KEY` (sent as a Bearer token when
+non-empty; this deployment has none), and `LLAMA_SWAP_POLL` (watcher poll
+interval in seconds, default 2). The zsh completion additionally reads
+`LLAMA_SWAP_CONFIG` (the config file it lists profiles from, default
+`$HOME/dotfiles/llama-swap/config.yaml`). The profile names themselves are not env vars:
 `PROFILE_DESKTOP` and `PROFILE_HEADLESS` sit at the top of `llama-swap-cli`.
