@@ -104,21 +104,39 @@ cmd_unload() {
   unload_all || exit 1
 }
 
+# Count GPUs the host nvidia driver is bound to. One /dev/nvidiaN node per
+# bound GPU, and the driver removes the node when a GPU is unbound, e.g. when
+# it is passed through to a VM. A glob count avoids an nvidia-smi spawn and
+# parsing its output every poll.
+gpu_count() {
+  local n=0 d
+  for d in /dev/nvidia[0-9]*; do
+    # n=$((n+1)), not ((n++)): the latter exits 1 when n is 0 and set -e would kill us
+    [[ -e $d ]] && n=$((n+1))
+  done
+  printf '%d\n' "$n"
+}
+
 # Every poll, not just on sddm transitions: a daemon restart can drop the
 # active profile to none, and a stale last would keep the watcher from
 # noticing that. set_profile is a no-op when the profile already matches, so
 # the steady state is one cheap GET per poll and zero writes.
+# Desktop profile when sddm runs, or when only one GPU is bound to the host
+# (the 4090 passed through to a VM, leaving the 3090 alone), so vllm does not
+# try to run the dual profile on a GPU that is not there.
 watch() {
-  local st target last=""
+  local st gpus target last=""
   while :; do
     st=$(systemctl is-active sddm 2>/dev/null || true)
-    case $st in
-      active|activating) target=$PROFILE_DESKTOP ;;
-      *) target=$PROFILE_HEADLESS ;;
-    esac
+    gpus=$(gpu_count)
+    if (( gpus == 1 )) || [[ $st == active || $st == activating ]]; then
+      target=$PROFILE_DESKTOP
+    else
+      target=$PROFILE_HEADLESS
+    fi
     if [[ $target != "$last" ]]; then
       last=$target
-      printf 'llama-swap-cli: sddm=%s, target %s\n' "$st" "$target"
+      printf 'llama-swap-cli: sddm=%s gpus=%d, target %s\n' "$st" "$gpus" "$target"
     fi
     if set_profile "$target" quiet; then
       sleep $POLL

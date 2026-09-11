@@ -1,9 +1,17 @@
 # llama-swap-watcher
 
-A small CLI client for the llama-swap model-swap daemon's profile API, plus a
-systemd service that keeps the active profile in sync with the sddm display
-manager. The desktop profile runs while sddm is up, the headless profile when
-it is down.
+This is very specific to my own setup, but sharing just in case it might be
+helpful to someone else. I have two gpus and I want to use both for inference
+if they're both available. Sometimes, though, one of them is being used by
+Wayland/Proton or by a libvirt VM. I have single/dual profiles in llama-swap so
+this little daemon just makes sure to pick the right active profile based on
+what's running.
+
+As a bonus, the [qemu](qemu) directory contains start/release scripts for
+libvirt to successfully unbind one of the gpus from Linux so it can be passed
+through to the VM and then reattach it when the VM is done.
+
+# AI description below
 
 Two artifacts: `llama-swap-cli`, the command, and `llama-swap-sddm.service`,
 the unit that runs `llama-swap-cli watch` forever. `install.sh` puts both on
@@ -28,9 +36,11 @@ unit to `/etc/systemd/system/`, then runs `systemctl daemon-reload` and
 
 ## How the service behaves
 
-`llama-swap-cli watch` polls `systemctl is-active sddm` every 2 seconds. When
-sddm is `active` or `activating`, the target profile is `vllm-3090`; in every
-other state it is `vllm-dual`. Every poll also re-reads the daemon's active
+`llama-swap-cli watch` polls `systemctl is-active sddm` and the bound-GPU
+count (`/dev/nvidia[0-9]*` nodes) every 2 seconds. The target profile is
+`vllm-3090` when sddm is `active` or `activating`, or when only one GPU is
+bound to the host (the 4090 passed through to a VM, leaving the 3090); in
+every other case it is `vllm-dual`. Every poll also re-reads the daemon's active
 profile and switches only when it differs, so a healthy setup costs one GET
 per poll and zero writes. Verifying every poll (not just on sddm
 transitions) is what recovers a daemon restart: the API has no notion of a

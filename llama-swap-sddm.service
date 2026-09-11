@@ -1,5 +1,5 @@
 [Unit]
-Description=llama-swap profile switcher: vllm-3090 while sddm runs, vllm-dual when it stops
+Description=llama-swap profile switcher: vllm-3090 while sddm runs or only one GPU is bound, vllm-dual otherwise
 
 [Service]
 ExecStart=/usr/local/bin/llama-swap-cli watch
