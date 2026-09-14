@@ -104,16 +104,15 @@ cmd_unload() {
   unload_all || exit 1
 }
 
-# Count GPUs the host nvidia driver is bound to. One /dev/nvidiaN node per
-# bound GPU, and the driver removes the node when a GPU is unbound, e.g. when
-# it is passed through to a VM. A glob count avoids an nvidia-smi spawn and
-# parsing its output every poll.
+# Count GPUs the driver reports. nvidia-smi's query API, not /dev/nvidiaN
+# nodes: udev creates one node per PCI function and the node survives an
+# unbind, so a passed-through GPU leaves a stale node behind. The query CSV
+# format has been stable since CUDA 7; the spawn is ~20ms, negligible at a
+# 2s poll. If the driver is not loaded at all nvidia-smi exits nonzero;
+# count 0 in that case.
 gpu_count() {
-  local n=0 d
-  for d in /dev/nvidia[0-9]*; do
-    # n=$((n+1)), not ((n++)): the latter exits 1 when n is 0 and set -e would kill us
-    [[ -e $d ]] && n=$((n+1))
-  done
+  local n
+  n=$( { nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || true; } | wc -l)
   printf '%d\n' "$n"
 }
 

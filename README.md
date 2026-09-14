@@ -36,8 +36,8 @@ unit to `/etc/systemd/system/`, then runs `systemctl daemon-reload` and
 
 ## How the service behaves
 
-`llama-swap-cli watch` polls `systemctl is-active sddm` and the bound-GPU
-count (`/dev/nvidia[0-9]*` nodes) every 2 seconds. The target profile is
+`llama-swap-cli watch` polls `systemctl is-active sddm` and the GPU count
+reported by the driver (`nvidia-smi`) every 2 seconds. The target profile is
 `vllm-3090` when sddm is `active` or `activating`, or when only one GPU is
 bound to the host (the 4090 passed through to a VM, leaving the 3090); in
 every other case it is `vllm-dual`. Every poll also re-reads the daemon's active
