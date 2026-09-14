@@ -12,6 +12,8 @@ AUDIO_IDS="10de:22ba"
 USB_PCI="0000:0d:00.0"
 USB_IDS="1022:43f7"
 
+mount /mnt/d 2>/dev/null || true
+
 echo "==> Unbinding GPU/audio/USB controller from vfio-pci"
 for dev in "$GPU_PCI" "$AUDIO_PCI" "$USB_PCI"; do
   driver="/sys/bus/pci/devices/$dev/driver"
@@ -30,7 +32,8 @@ for dev in "$GPU_PCI" "$AUDIO_PCI" "$USB_PCI"; do
   echo "$dev" >/sys/bus/pci/drivers_probe
 done
 
-nvidia-smi -i 0 -pm 1
+# reapply persistence and power limits
+systemctl restart nvidia-power-limit.service
 
 sleep 1
 echo "==> Done. Current drivers:"
@@ -45,4 +48,5 @@ echo "==> Restarting llama-swap (both GPUs available again)"
 docker restart llama-swap 2>/dev/null || echo "    (couldn't restart llama-swap — check it manually)"
 
 echo "==> Starting penguin-burnerd"
-systemctl start penguin-burnerd.service 2>/dev/null || echo "    (couldn't start penguin-burnerd — check it manually)"
+# systemctl start penguin-burnerd.service 2>/dev/null || echo "    (couldn't start penguin-burnerd — check it manually)"
+/home/cam/.local/bin/pburn-apply-profiles.sh

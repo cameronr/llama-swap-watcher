@@ -12,6 +12,9 @@ AUDIO_IDS="10de:22ba"
 USB_PCI="0000:0d:00.0"
 USB_IDS="1022:43f7"
 
+# Unmount d if it's mounted
+umount /mnt/d 2>/dev/null || true
+
 # NOTE: USB_PCI is the whole onboard USB 3.2 controller (K830 receiver +
 # both Xbox controllers live on it). The moment this unbinds, your host
 # keyboard/mouse on that controller go dead until attach-gpu.sh runs.
