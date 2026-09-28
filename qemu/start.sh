@@ -2,6 +2,11 @@
 # detach-gpu.sh — unbind the 4090 from nvidia, bind to vfio-pci
 # Run with sudo. Run this manually before starting the VM if not using
 # the libvirt hook, or to test the process by hand.
+#
+# Strictly two-phase: every step that releases the 4090 from the host
+# (phase 1) completes before any step that claims it (phase 2), with a
+# settle wait between. vfio-pci binding while nvidia is still tearing the
+# card down is what used to hang the VM start.
 set -e
 
 GPU_PCI="0000:01:00.0"
@@ -11,6 +16,8 @@ AUDIO_IDS="10de:22ba"
 
 USB_PCI="0000:0d:00.0"
 USB_IDS="1022:43f7"
+
+# Phase 1: release the 4090 from the host
 
 # Unmount d if it's mounted
 umount /mnt/d 2>/dev/null || true
@@ -22,14 +29,27 @@ umount /mnt/d 2>/dev/null || true
 # need to type anything else on the host afterward — SSH in from another
 # machine first if you're not already on a separate input device.
 
-echo "==> Stopping GPU-using services so the 4090 can be released cleanly"
+echo "==> Stopping everything that can hold the 4090 open"
 docker stop llama-swap 2>/dev/null || echo "    (llama-swap already stopped or not found)"
 systemctl stop penguin-burnerd.service 2>/dev/null || echo "    (penguin-burnerd already stopped)"
-nvidia-smi -i 0 -pm 0
+# nvidia-persistenced keeps an fd on every nvidia device node; the unbind
+# below blocks while that fd is open
+systemctl stop nvidia-persistenced.service 2>/dev/null || echo "    (nvidia-persistenced already stopped or not present)"
+# -i takes a PCI bus id so this always hits the 4090; by index it would
+# retarget to the 3090 once the 4090 is off the nvidia driver (re-runs)
+nvidia-smi -i "00000000:${GPU_PCI#0000:}" -pm 0 2>/dev/null || echo "    (4090 not visible to nvidia - already detached?)"
 
 echo "==> Checking nothing has the 4090 open (nvidia module stays loaded for the 3090)"
 if command -v nvidia-smi >/dev/null; then
   if nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader -i "$(nvidia-smi --query-gpu=index,pci.bus_id --format=csv,noheader | grep -i "${GPU_PCI#0000:}" | cut -d, -f1)" 2>/dev/null | grep -q .; then
+    # As a libvirt hook (args present) a busy 4090 means the unbind below
+    # will block and the VM start hangs forever: fail loudly instead.
+    # Run manually (no args) it stays a warning so you can inspect first.
+    if [ -n "${1-}" ]; then
+      echo "    ERROR: a process still has the 4090 open; refusing to unbind."
+      echo "    Check 'nvidia-smi' and make sure your inference workload is pinned to the 3090."
+      exit 1
+    fi
     echo "    WARNING: a process still has the 4090 open. Unbind will likely fail."
     echo "    Check 'nvidia-smi' and make sure your inference workload is pinned to the 3090."
   fi
@@ -42,6 +62,11 @@ for dev in "$GPU_PCI" "$AUDIO_PCI" "$USB_PCI"; do
     echo "$dev" >"$driver/unbind"
   fi
 done
+
+echo "==> Waiting 3s for the unbinds to fully settle before claiming the devices"
+sleep 3
+
+# Phase 2: claim the 4090 for the VM
 
 echo "==> Loading vfio-pci and claiming device IDs"
 modprobe vfio-pci

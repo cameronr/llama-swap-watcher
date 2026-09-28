@@ -32,7 +32,11 @@ for dev in "$GPU_PCI" "$AUDIO_PCI" "$USB_PCI"; do
   echo "$dev" >/sys/bus/pci/drivers_probe
 done
 
-# reapply persistence and power limits
+# put nvidia-persistenced back (start.sh stopped it); it re-enables
+# persistence on the 4090 now that the card is on the host again
+systemctl start nvidia-persistenced.service 2>/dev/null || echo "    (nvidia-persistenced not present)"
+
+# reapply power limits
 systemctl restart nvidia-power-limit.service
 
 sleep 1
