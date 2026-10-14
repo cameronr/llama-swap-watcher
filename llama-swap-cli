@@ -2,10 +2,6 @@
 set -euo pipefail
 
 URL=${LLAMA_SWAP_URL:-http://localhost:8020}
-PROFILE_DESKTOP=vllm-3090
-PROFILE_HEADLESS=vllm-dual
-POLL=${LLAMA_SWAP_POLL:-2}
-RETRY=10
 API_CODE=""
 API_BODY=""
 
@@ -31,10 +27,9 @@ api() {
   [[ $API_CODE == 2* ]]
 }
 
-# Stop every loaded model (POST /api/models/unload). Called after a switch to
-# the desktop profile so the 3090 keeps its VRAM free for hyprland. Blocks
-# until the daemon has stopped the processes (docker stop), so it can take a
-# few seconds. Best effort: a failure here never undoes the profile switch.
+# Stop every loaded model (POST /api/models/unload), freeing GPU VRAM.
+# Blocks until the daemon has stopped the processes (docker stop), so it can
+# take a few seconds.
 unload_all() {
   if ! api POST /api/models/unload >/dev/null; then
     # no http code means the daemon is unreachable and api() already reported it
@@ -46,15 +41,14 @@ unload_all() {
   printf 'llama-swap-cli: unloaded all models\n'
 }
 
-# set_profile NAME [quiet]: no-op when NAME is already active, and silent
-# when quiet, so the watcher can call it every poll without log noise.
+# set_profile NAME: no-op when NAME is already active.
 set_profile() {
-  local name=$1 quiet=${2-}
+  local name=$1
   local json active new
   json=$(api GET /api/profiles) || return 1
   active=$(jq -r .active <<<"$json")
   if [[ $active == "$name" ]]; then
-    [[ -n $quiet ]] || printf 'llama-swap-cli: %s is already active\n' "$name"
+    printf 'llama-swap-cli: %s is already active\n' "$name"
     return 0
   fi
   # in the current shell, not $( ), so API_CODE/API_BODY survive the call
@@ -63,10 +57,6 @@ set_profile() {
     new=$(jq -r .active <<<"$API_BODY")
     [[ $new == "$name" ]] || return 1
     printf 'llama-swap-cli: active profile set to %s\n' "$name"
-    if [[ $name == "$PROFILE_DESKTOP" ]]; then
-      # desktop profile: free the 3090's VRAM for hyprland (best effort)
-      unload_all || :
-    fi
   elif [[ $API_CODE == 404 ]]; then
     printf "llama-swap-cli: unknown profile '%s'\n" "$name" >&2
     jq -r '.profiles | map(.id) | join(", ")' <<<"$json" >&2
@@ -91,6 +81,13 @@ cmd_list() {
   ' <<<"$json"
 }
 
+# Print only the active profile name (or none), so scripts can capture it.
+cmd_status() {
+  local json
+  json=$(api GET /api/profiles) || exit 1
+  jq -r .active <<<"$json"
+}
+
 cmd_set() {
   local name=${1-}
   if ! [[ $name =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -104,58 +101,16 @@ cmd_unload() {
   unload_all || exit 1
 }
 
-# Count GPUs the driver reports. nvidia-smi's query API, not /dev/nvidiaN
-# nodes: udev creates one node per PCI function and the node survives an
-# unbind, so a passed-through GPU leaves a stale node behind. The query CSV
-# format has been stable since CUDA 7; the spawn is ~20ms, negligible at a
-# 2s poll. If the driver is not loaded at all nvidia-smi exits nonzero;
-# count 0 in that case.
-gpu_count() {
-  local n
-  n=$( { nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || true; } | wc -l)
-  printf '%d\n' "$n"
-}
-
-# Every poll, not just on sddm transitions: a daemon restart can drop the
-# active profile to none, and a stale last would keep the watcher from
-# noticing that. set_profile is a no-op when the profile already matches, so
-# the steady state is one cheap GET per poll and zero writes.
-# Desktop profile when sddm runs, or when only one GPU is bound to the host
-# (the 4090 passed through to a VM, leaving the 3090 alone), so vllm does not
-# try to run the dual profile on a GPU that is not there.
-watch() {
-  local st gpus target last=""
-  while :; do
-    st=$(systemctl is-active sddm 2>/dev/null || true)
-    gpus=$(gpu_count)
-    if (( gpus == 1 )) || [[ $st == active || $st == activating ]]; then
-      target=$PROFILE_DESKTOP
-    else
-      target=$PROFILE_HEADLESS
-    fi
-    if [[ $target != "$last" ]]; then
-      last=$target
-      printf 'llama-swap-cli: sddm=%s gpus=%d, target %s\n' "$st" "$gpus" "$target"
-    fi
-    if set_profile "$target" quiet; then
-      sleep $POLL
-    else
-      # daemon down or a failed set; slower cadence so the journal does not flood
-      sleep $RETRY
-    fi
-  done
-}
-
 usage() {
   cat >&2 <<'EOF'
 usage: llama-swap-cli <command>
 
   list   list profiles, mark the active one
+  status print the active profile name
   set    set the active profile
   unload stop all loaded models (frees GPU VRAM)
-  watch  keep the profile in sync with sddm (used by the systemd service)
 
-env: LLAMA_SWAP_URL, LLAMA_SWAP_API_KEY, LLAMA_SWAP_POLL
+env: LLAMA_SWAP_URL, LLAMA_SWAP_API_KEY
 EOF
 }
 
@@ -165,9 +120,9 @@ if [[ $# -eq 0 ]]; then
 fi
 case $1 in
   list) cmd_list ;;
+  status) cmd_status ;;
   set) cmd_set "${2-}" ;;
   unload) cmd_unload ;;
-  watch) watch ;;
   -h|--help) usage; exit 0 ;;
   *) usage; exit 1 ;;
 esac
