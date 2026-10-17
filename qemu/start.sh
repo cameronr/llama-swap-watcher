@@ -9,13 +9,31 @@
 # card down is what used to hang the VM start.
 set -e
 
-GPU_PCI="0000:01:00.0"
-AUDIO_PCI="0000:01:00.1"
 GPU_IDS="10de:2684"
 AUDIO_IDS="10de:22ba"
-
-USB_PCI="0000:0d:00.0"
+# USB 3.2 controller. The SATA AHCI controller is 1022:43f6 — unbinding that
+# takes the VM's disk drive off the bus.
 USB_IDS="1022:43f7"
+
+# Resolve PCI addresses from vendor:device IDs so the script survives any
+# firmware re-enumeration (BIOS update, hardware changes).
+resolve_pci() {
+  local id="$1" addr
+  addr=$(lspci -n -d "$id" | head -n1 | cut -d' ' -f1)
+  if [ -z "$addr" ]; then
+    echo "ERROR: no PCI device found with ID $id" >&2
+    exit 1
+  fi
+  # lspci omits the domain when it's 0000; normalize to the full form
+  case "$addr" in
+    *:*:*) printf '%s\n' "$addr" ;;
+    *)     printf '0000:%s\n' "$addr" ;;
+  esac
+}
+
+GPU_PCI=$(resolve_pci "$GPU_IDS")
+AUDIO_PCI=$(resolve_pci "$AUDIO_IDS")
+USB_PCI=$(resolve_pci "$USB_IDS")
 
 # Phase 1: release the 4090 from the host
 
@@ -77,6 +95,16 @@ echo "$USB_IDS" >/sys/bus/pci/drivers/vfio-pci/new_id 2>/dev/null || true
 echo "==> Binding to vfio-pci"
 for dev in "$GPU_PCI" "$AUDIO_PCI" "$USB_PCI"; do
   echo "$dev" >/sys/bus/pci/drivers/vfio-pci/bind 2>/dev/null || true
+done
+
+# Fail loudly if anything didn't land on vfio-pci. Silently continuing here
+# once meant passing a wrong PCI address and killing the SATA controller.
+for dev in "$GPU_PCI" "$AUDIO_PCI" "$USB_PCI"; do
+  bound=$(basename "$(readlink -f "/sys/bus/pci/devices/$dev/driver" 2>/dev/null)" 2>/dev/null)
+  if [ "$bound" != "vfio-pci" ]; then
+    echo "ERROR: $dev is bound to '${bound:-nothing}', not vfio-pci. Aborting." >&2
+    exit 1
+  fi
 done
 
 echo "==> Done. Current drivers:"
