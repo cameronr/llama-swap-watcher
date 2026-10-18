@@ -1,54 +1,13 @@
 #!/bin/bash
-# attach-gpu.sh — unbind the 4090 from vfio-pci, restore the nvidia driver
-# Run with sudo. Run this manually after stopping the VM if not using
-# the libvirt hook, to get the card back for inference.
+# release hook for the win11 VM: bring the host back after the VM stops.
+#
+# libvirt has already re-attached the GPU, its audio function and the USB
+# 3.2 controller to their host drivers (managed='yes' hostdevs) before this
+# runs, so there is no PCI work here — just restart what start.sh stopped
+# and remount the WD data disk the VM was holding.
 set -e
 
-GPU_IDS="10de:2684"
-AUDIO_IDS="10de:22ba"
-# USB 3.2 controller. The SATA AHCI controller is 1022:43f6 — unbinding that
-# takes the VM's disk drive off the bus.
-USB_IDS="1022:43f7"
-
-# Resolve PCI addresses from vendor:device IDs so the script survives any
-# firmware re-enumeration (BIOS update, hardware changes).
-resolve_pci() {
-  local id="$1" addr
-  addr=$(lspci -n -d "$id" | head -n1 | cut -d' ' -f1)
-  if [ -z "$addr" ]; then
-    echo "ERROR: no PCI device found with ID $id" >&2
-    exit 1
-  fi
-  # lspci omits the domain when it's 0000; normalize to the full form
-  case "$addr" in
-    *:*:*) printf '%s\n' "$addr" ;;
-    *)     printf '0000:%s\n' "$addr" ;;
-  esac
-}
-
-GPU_PCI=$(resolve_pci "$GPU_IDS")
-AUDIO_PCI=$(resolve_pci "$AUDIO_IDS")
-USB_PCI=$(resolve_pci "$USB_IDS")
-
 mount /mnt/d 2>/dev/null || true
-
-echo "==> Unbinding GPU/audio/USB controller from vfio-pci"
-for dev in "$GPU_PCI" "$AUDIO_PCI" "$USB_PCI"; do
-  driver="/sys/bus/pci/devices/$dev/driver"
-  if [ -e "$driver" ]; then
-    echo "$dev" >"$driver/unbind"
-  fi
-done
-
-echo "==> Releasing vfio-pci device IDs"
-echo "$GPU_IDS" >/sys/bus/pci/drivers/vfio-pci/remove_id 2>/dev/null || true
-echo "$AUDIO_IDS" >/sys/bus/pci/drivers/vfio-pci/remove_id 2>/dev/null || true
-echo "$USB_IDS" >/sys/bus/pci/drivers/vfio-pci/remove_id 2>/dev/null || true
-
-echo "==> nvidia module is already loaded (serving the 3090) — just re-probing devices"
-for dev in "$GPU_PCI" "$AUDIO_PCI" "$USB_PCI"; do
-  echo "$dev" >/sys/bus/pci/drivers_probe
-done
 
 # put nvidia-persistenced back (start.sh stopped it); it re-enables
 # persistence on the 4090 now that the card is on the host again
@@ -58,11 +17,6 @@ systemctl start nvidia-persistenced.service 2>/dev/null || echo "    (nvidia-per
 systemctl restart nvidia-power-limit.service
 
 sleep 1
-echo "==> Done. Current drivers:"
-lspci -k -s "${GPU_PCI#0000:}"
-lspci -k -s "${AUDIO_PCI#0000:}"
-lspci -k -s "${USB_PCI#0000:}"
-
 echo "==> nvidia-smi check:"
 nvidia-smi -L
 
